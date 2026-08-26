@@ -4,8 +4,11 @@ Local AI roleplay / visual-novel engine. Modeled on imaginarium.rocks
 after reverse-engineering it, but with a deliberately different rendering
 architecture. Runs entirely local on an M3 MacBook Pro, 64GB, via Ollama.
 
-**Status: v0 works.** Text-only. Characters talk, you can write their
-lines or generate them. No images yet, by design.
+**Status: v0 works, and the first voice test has been run.** Text-only.
+Characters talk, you can write their lines or generate them. No images yet,
+by design. The first `/auto 20` exposed a convergence failure that has since
+been addressed in the creation layer — see *What the first voice test showed*
+below before changing anything in `creation.py` or `play.py`.
 
 ---
 
@@ -15,7 +18,8 @@ lines or generate them. No images yet, by design.
 - **Model:** `qwen3.8:27b-mlx` via Ollama (18GB). Also installed:
   `qwen2.5:14b-instruct`, `qwen2.5:7b-instruct`, `mistral-nemo:12b`,
   `qwen3:8b`, `qwen3-coder:latest`
-- **Code lives at:** `~/Documents/Imagineverse`
+- **Code lives at:** `~/Documents/imaginarium` (git; private remote
+  `Intranet-Explorer/imaginarium`)
 - **Python 3.14**, stdlib only — no pip dependencies
 - **Also available:** a loaned NVIDIA GB10 Grace-Blackwell workstation,
   currently used for a separate Chatterbox TTS voice-cloning pipeline.
@@ -24,8 +28,11 @@ lines or generate them. No images yet, by design.
 ## Running it
 
 ```bash
-cd ~/Documents/Imagineverse
+cd ~/Documents/imaginarium
 export IMAGINARIUM_CTX=16384
+
+python3 test_offline.py    # schema, prompts, summary, loop-breaker — no model
+python3 test_stream.py     # stream_line buffering — no model
 
 python3 cli.py models                                   # smoke test
 python3 cli.py char new --world "Between the Stations"  # twice
@@ -50,6 +57,8 @@ write a line yourself, `/add`, `/drop`, `/undo`, `/t`, `/temp`, `/model`,
 | `creation.py` | Character/location generation from one description → JSON |
 | `play.py` | Prompt assembly, turn generation, terminal rendering |
 | `cli.py` | Subcommands + interactive play REPL |
+| `test_offline.py` | Migration, relationships, prompt assembly, summary, loop-breaker — stubbed llm, no Ollama |
+| `test_stream.py` | `stream_line` buffering against scripted events |
 | `README.md` | Setup and design notes |
 
 ---
@@ -81,7 +90,27 @@ model adds one. Keep strict — the Stage Manager parses this later.
 migration later.
 
 **`IMAGINARIUM_CTX` matters.** Ollama defaults to 4096 tokens and
-silently truncates — a long transcript loses its head with no error.
+silently truncates — a long transcript loses its head with no error. The
+rolling summary now caps growth, but the ceiling still has to be set.
+
+**Characters are never generated in isolation.** `make_character` takes the
+existing cast and must produce someone who collides with one of them.
+Relationships are a first-class table: each pair gets two directional rows
+(`wants` / `withholds` per side, symmetric `history` / `friction`). Generating
+a character alone produces someone written against an implied absent human,
+who then has nothing to want from the people actually in the room.
+
+**Actions earn their place.** The rule is no longer a quota ("most lines
+should have none" — unenforceable mid-generation) but a test the model can
+apply per line: include an action only when the body does something the words
+do not say. `<looks away> I'm fine.` keeps; `<smiles> That's funny.` cuts.
+
+**The transcript is sent as a rolling summary plus the last `WINDOW` turns.**
+Not the whole log. This caps context and, more importantly, stops the
+transcript out-weighing the persona tail by an ever-growing margin — which is
+what drives voice convergence. The summary sits at the top of the user block
+and only changes every `SUMMARIZE_EVERY` turns, so the cache still holds most
+turns.
 
 ---
 
@@ -101,8 +130,62 @@ silently truncates — a long transcript loses its head with no error.
    second character silently. Now stable numbering with ✓ toggles.
 5. **Generation errors crashed the whole REPL** — now caught, printed in
    red, session continues.
+6. **`/model <tag>` discarded the resolved name** — validated a bare stem via
+   `load_model`, then set `MODEL` to the stem instead of the full tag it had
+   resolved. Passed validation, 404'd at generation. Same shape as bug 2,
+   through a different door. `cmd_play`'s startup always did this correctly.
+7. **`clean_line` ate leading emphasis** — `*Never* again.` became
+   `<Never> again.`, fabricating an action tag. Since transcripts are the
+   Stage Manager's training corpus, a false tag is corpus poison. The rewrite
+   now requires two words and a lowercase opening verb.
+8. **`stream_line` tracked emitted *length*, not text** — `_visible()` could
+   return a shorter string than the previous event (a `<think>` opening
+   collapsed it to `""`), leaving the counter stranded above it and silently
+   swallowing the real line. `_visible` is now monotonic: it strips think
+   blocks while keeping text on both sides.
 
 ---
+
+## What the first voice test showed
+
+`/auto 20`, session 1, two characters both described as robots.
+
+**The test was confounded** — both source descriptions were machines, so the
+run cannot separate *the engine blurs voices* from *these two were specified
+as the same character*. It has to be rerun with two people who want
+incompatible things.
+
+**The failure mode is template lock, not voice blur.** All ten of Pip's turns
+opened `I observe ...`; all ten of Echo's opened `Analyzing:` or `Logging:`.
+Locked by turn 2, never broken, at temp 0.85. `I observe` was not even in
+Pip's tics list — it emerged. The characters were trivially distinguishable
+and neither was a character. Covering the names and answering "yes, I can
+tell them apart" would have been the wrong conclusion: the differentiation
+was purely mechanical.
+
+**The personas were good and still did not save it.** Both were specific and
+genuinely opposed in want. Two reasons they failed anyway:
+
+1. `CHARACTER_SYSTEM`'s free "how they behave under pressure" field produced
+   the *same stock answer* in both — freeze and repeat the last input in a
+   loop. Turns 3–5 are literally that loop, both characters executing their
+   personas correctly, in unison. Correlated personas, not a sampler problem.
+2. Pip's richest material was all about its "primary companion", a human not
+   in the scene. Its one line covering the actual situation said it treats
+   other robots with *clinical indifference*. A persona written alone is
+   written against an absent partner.
+
+**Tic bleed takes two exposures.** Echo's `Logging:/Requesting:` grammar was
+in Pip's mouth by turn 4. Action tags mirrored too — turn 5's
+`<tilts head, optical sensors narrowing slightly>` is turn 4's
+`<tilts head, optical lenses narrowing slightly>` with one word changed.
+
+**Action inflation was 100%, not partial.** 20 of 20 turns carried a tag; 19
+of 20 were compound (2–3 clauses). Rough classification: ~14 transient,
+~4 positional, ~2 affective, ~1 postural.
+
+**What worked:** the markup contract held perfectly. Zero leading-name leaks,
+zero asterisk-actions, zero multi-line output, no narrator confusion.
 
 ## What we learned reverse-engineering imaginarium.rocks
 
@@ -183,6 +266,27 @@ scale(y) = (y - horizon_y) / (y_ref - horizon_y)
 human correction pass. Keep an `anchor.source` column (`detected` /
 `manual`) so re-running detection doesn't stomp human fixes.
 
+**Findings from the compositing harness** (Stage Plot — a browser page that
+runs the anchor maths with placeholder art, no models and no GPU):
+
+- **The example anchors above do not satisfy the scale formula.** With
+  `horizon_y 0.38` and `y_ref 0.61` the denominator is 0.230, so `desk_far`
+  computes 0.870 against a stored 0.94, and `doorway` computes 0.739 against
+  a stored 1.05 — a figure that clips out of frame. The doorway is *further
+  from camera* than the near desk and stored *larger*. Validate detected
+  scales against the ground plane before writing them.
+- **Bottom-centre of the bbox is not the ground contact for a seated pose.**
+  It is fine standing. Seated, the legs project forward and the feet land
+  around 0.75 of the sprite's width, so centring the bbox on the anchor puts
+  the body a quarter of a sprite-width off its own shadow. Store a
+  `contact_x` per pose class alongside the anchor.
+- **Depth ordering is a third thing.** A desk the character sits behind has
+  to draw *over* the sprite, and a sprite cannot express "the desk is in
+  front of me". Each location needs a foreground plate and a rule for which
+  anchors sit behind it.
+- `camera_contract` is now a stored column on `location`, not a convention to
+  remember. Vary it and every anchor for that location becomes invalid.
+
 Resist anchor creep — 2–3 staging positions per location, like a stage
 play.
 
@@ -205,10 +309,31 @@ visual state**:
 `<taps one manicured nail against the desk>` is transient.
 `<uncrosses her legs, the movement deliberate>` is postural.
 
+**Corrections from the first run — read before building this:**
+
+- **"Skip on no-signal" does not fire.** It assumed most turns are pure
+  dialogue. Zero of twenty were. Recost the classifier as running on every
+  turn. The gate is still worth keeping for the case where the new format
+  rules actually reduce tagging, but do not budget for it.
+- **Compound actions are the norm, not the exception** — 19 of 20 carried two
+  or three clauses, and they cross categories:
+  `<stands, shrugging out of her coat>` is postural *and* wardrobe.
+  A grammar that forces one label per turn discards half the state change.
+  Emit a set, and define which axis wins when two fire at once.
+- **`positional` conflates two different renders.** `<drifts closer to Echo>`
+  is an *anchor change* within the location; `<walks out>` is a *location
+  change*. The first is a sprite reposition, the second a background swap.
+  Four anchor-changes and zero location-changes in twenty turns — so the
+  common case is the one the current definition would get wrong.
+- **The Narrator channel is unhandled.** All five categories describe a
+  character's body. `Narrator: the platform lights cut out` is a scene-state
+  change with no speaker and no anchor, and it is the most likely trigger for
+  a background or lighting change. It currently falls straight through.
+
 Two rules that matter more than they look:
 
 - **Skip on no-signal.** Gate the classifier on the presence of action
-  markup at all. Most turns are pure dialogue.
+  markup at all.
 - **Sticky state with different volatilities.** Pose and outfit persist
   until explicitly changed; expression moves freely; location changes
   only on explicit transition. Without this you get sprite flicker —
@@ -256,29 +381,42 @@ good image, ~15s, cached in the session.
 
 ## Immediate next steps, in order
 
-1. **Play sessions and judge voice quality.** This is what v0 is for.
-   Run `/auto 20`, cover the names, ask whether you can tell who's
-   speaking. If not, fix `CHARACTER_SYSTEM` in `creation.py` — push
-   harder on incompatible wants and specific avoidance behaviors. No
-   downstream architecture repairs flat personas.
-2. **Watch action inflation.** If every line carries a gesture tag,
-   that's model padding, and it makes the transient/postural distinction
-   load-bearing sooner.
-3. **`/export` good transcripts.** They become the test fixtures for the
-   Stage Manager — real action tags from real play beats invented cases.
-4. **Build the Stage Manager against those fixtures**, standalone. Feed
-   it transcript lines, check the state tuples. Get it solid before any
-   image code exists.
+1. **Rerun the twenty with two humans who want incompatible things.** The
+   creation layer now demands a collision and writes the relationship, so
+   this is the first honest run. Judge it on: do they disagree, does anyone
+   change position, and is the action rate below 100%.
+2. **Then run twenty where you write one side.** That is the actual UX — the
+   turn-control model has the user occupying a slot. `/auto` runs both sides
+   autonomously, which is a mode the design never targeted and a harsher test
+   than the product will face. Do not conclude the product is broken from an
+   autoplay result.
+3. **`/export` the good transcripts.** They are the Stage Manager's fixtures.
+   Real action tags from real play beat invented cases — and the first run
+   already proves invented cases would have been wrong about the skip rate.
+4. **Build the Stage Manager against those fixtures**, standalone, with the
+   four corrections above applied.
 5. **Then** the ComfyUI sprite pipeline and anchor derivation.
 
 ## Open questions
 
-- Does a 27B MoE (~3B active) hold character voice well enough, or does
-  this need a dense model? If personas are good and voices still blur,
-  that's the next variable — try `qwen2.5:14b-instruct` dense as a
-  control, or a dense 27–32B.
-- Temperature sensitivity: `/temp 1.0` vs `/temp 0.6` on the same scene.
-  Divergence between characters usually varies more than expected.
-- Cutout sprites vs scene-integrated staging for seated poses —
-  currently resolved as "cutouts + anchors + contact shadow," but worth
-  revisiting if seated poses look wrong in practice.
+- **Does the model hold voice once the personas actually differ?** The first
+  run could not answer this — the characters were specified nearly
+  identically and both locked onto templates. Unresolved until step 1 above.
+- Does a 27B MoE (~3B active) hold character voice well enough, or does this
+  need a dense model? Only worth testing after a clean run. If personas
+  collide properly and voices still blur, try `qwen2.5:14b-instruct` dense as
+  a control, or a dense 27–32B.
+- Temperature sensitivity: `/temp 1.0` vs `/temp 0.6` on the same scene. Note
+  that template lock survived 0.85, so temperature alone is unlikely to be
+  the lever.
+- **Does the rolling summary cost more than it saves?** It caps context and
+  weakens the transcript's grip on voice, but a summary is lossy and the
+  characters lose access to their own exact words. Watch for callbacks that
+  stop landing. `IMAGINARIUM_WINDOW=999` disables it in practice.
+- **Does the anti-mirror resample fire often enough to matter, or too often?**
+  It triggers on a third identical opening. Instrumentation would tell us
+  whether the new format rules already prevent the lock without it.
+- Cutout sprites vs scene-integrated staging for seated poses — the harness
+  says cutouts work provided `contact_x` is per-pose and there is a
+  foreground plate. Worth revisiting against real diffusion output, which
+  will not place feet as obligingly as placeholder art.
