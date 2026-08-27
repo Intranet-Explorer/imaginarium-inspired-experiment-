@@ -187,6 +187,57 @@ of 20 were compound (2–3 clauses). Rough classification: ~14 transient,
 **What worked:** the markup contract held perfectly. Zero leading-name leaks,
 zero asterisk-actions, zero multi-line output, no narrator confusion.
 
+## What the second voice test showed
+
+`/auto 80`, session 2, a session drummer and a studio owner, on the
+`relationships` branch. Both descriptions deliberately thin.
+
+**The relationship model delivered.** It invented a causal history — Silas
+made Marcus re-record a bridge nine times over a four-millisecond tempo
+error, which is where the tremor came from — and the scene runs on it.
+Non-mirrored wants, a real standoff, a clock. Turns 1–11 are a genuine scene.
+Opening-template lock is gone.
+
+**Then it found a deeper attractor: shape lock.** Two characters trading bare
+abstractions, each line picking up the noun the last one ended on.
+
+```
+                            run 1      run 2
+"X is Y" sentences          0/56     117/172  (68%)
+picks up the prior
+line's last word             15%          69%
+copula rate by quarter                57 / 58 / 61 / 90%
+```
+
+Openings stayed varied the whole way, so `scenestats.py` — which only
+measured openings — passed it. **That is the same mistake as judging by "can
+you tell them apart."** Any lock metric has to measure the rhetorical
+operation. It now scores copula rate and lexical carryover as well, and takes
+their mean, because either alone is ordinary writing.
+
+**The stalemate was designed in.** `friction` came back as "neither will
+concede" and `CHARACTER_SYSTEM` demanded "one thing you are wrong about and
+will defend anyway". Both held, so nothing could move — and when position is
+frozen the only free variable is intensity, so the scene ratcheted into
+physical escalation because that was the only thing left that could change.
+Fixed with `relationship.concedes`: what would actually move this person and
+what it costs.
+
+**A quality rule does not create scarcity.** The earn-its-place rule improved
+what the actions said and did nothing to how often they appeared — 79 of 80
+turns still carried one, and they now *passed* the rule. Action frequency is
+now capped mechanically (`ACTION_RUN`, default 1: no two tagged lines in a
+row from one speaker), instruction plus strip-as-backstop.
+
+**A summary that describes a pattern reinforces it.** The stored summary read
+"ideological standoff… no resolution", and that went back into the prompt
+every turn. It is now a change-log: what moved, and an explicit statement when
+nothing did.
+
+**Quality has a half-life.** Good through ~15, drifting by ~35, gone by ~60.
+Twenty turns would have looked like a clean success. Run long — the decay
+curve is the finding.
+
 ## What we learned reverse-engineering imaginarium.rocks
 
 Observed from screenshots and fetches. Relevant because it's the design
@@ -381,10 +432,11 @@ good image, ~15s, cached in the session.
 
 ## Immediate next steps, in order
 
-1. **Rerun the twenty with two humans who want incompatible things.** The
-   creation layer now demands a collision and writes the relationship, so
-   this is the first honest run. Judge it on: do they disagree, does anyone
-   change position, and is the action rate below 100%.
+1. **Rerun with the exit, the action cap and the stall nudge in place.** Run
+   long — 60+ turns — and score with `python3 scenestats.py`. Targets: shape
+   under 25%, action rate under 50%, and the copula-by-quarter trend flat
+   rather than climbing. The one thing no metric catches: **does either of
+   them give ground?**
 2. **Then run twenty where you write one side.** That is the actual UX — the
    turn-control model has the user occupying a slot. `/auto` runs both sides
    autonomously, which is a mode the design never targeted and a harsher test
